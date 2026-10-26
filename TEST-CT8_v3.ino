@@ -1,4 +1,4 @@
-//AGV CT8 v3: speed 1100 + PID nhẹ + tăng/giảm tốc theo tần số + dựng lại ramp khi tìm lại line + chống nhiễu ngã ba
+//AGV CT8 v6 26/10/2026
 #include "control_step.h"
 #include "sensor.h"
 const int pin_bao_mat_line = 45;
@@ -11,19 +11,19 @@ const unsigned long thoi_gian_bo_qua_mat_line = 500;
 const unsigned long thoi_gian_duy_tri_case_9 = 3000;   // Lỡ out line ở case 9 / -9: giữ lái + chạy tiếp thêm 3s rồi mới dừng
 const unsigned long thoi_gian_xac_nhan_co_line = 50;   // Thấy lại line liên tục 50ms mới coi là tìm lại được (lọc nhiễu)
 
-const int speed = 1100;
+const int speed = 1170;
 const int slowSpeed = 12000;
 const int startSpeed = 12000;
 const unsigned long thoi_gian_tang_toc = 9000;
 const unsigned long thoi_gian_giam_toc = 6000;
 
-const float KP_TBL[10] = {   0,  15,  30,  45,  65,  90, 125, 160, 220, 320 };
-const float KD_TBL[10] = { 300, 300, 300, 300, 300, 300, 300, 300, 300, 300 };
-// BU = độ giảm tốc khi lệch: speed + BU[9] = 1700 (giữ tốc độ cua như cũ), đường thẳng nhanh hơn
-const int   BU_TBL[10] = {   5,  10,  20,  50,  90, 120, 300, 400, 500, 600 };
+// --- PID GIỐNG AGV SHIZAI ---
+const float KP_TBL[10] = {   0,  25,  45,  70,  95, 130, 180, 220, 310, 500 };
+const float KD_TBL[10] = { 500, 500, 500, 500, 500, 500, 500, 500, 500, 500 };   // Kd cố định 500 như Shizai
+const int   BU_TBL[10] = {   5,  10,  20,  50,  80, 100, 240, 320, 410, 500 };
 const float Ki = 0.01;
-const float TIME_VAO_CUA = 300.0;
-const float TIME_RA_CUA  = 450.0;
+const float TIME_VAO_CUA = 200.0;
+const float TIME_RA_CUA  = 300.0;
 
 int raw_sensor = 0;
 int steering_error = 0;
@@ -49,6 +49,7 @@ float toc_do_khi_bat_dau_giam = startSpeed, toc_do_khi_bat_dau_tang = startSpeed
 unsigned long thoi_gian_bat_dau = 0, thoi_gian_bat_dau_giam = 0, last_ramp_time = 0;
 bool dang_tang_toc = true, dang_giam_toc = false;
 float smoothedError = 0, lastError = 0, integral = 0, lastPidOutput = 0;
+float current_Kp = KP_TBL[0], current_Kd = KD_TBL[0], current_offset = 0.0;
 
 void setup() {
     pinMode(pin_dung, OUTPUT); digitalWrite(pin_dung, HIGH); 
@@ -87,6 +88,7 @@ void KhoiTaoThongSoDeBa()
     dang_tang_toc = true; 
     dang_giam_toc = false;
     integral = 0; lastError = 0; smoothedError = 0;
+    current_Kp = KP_TBL[0]; current_Kd = KD_TBL[0]; current_offset = 0.0;
     lastPidOutput = 0;
 }
 
@@ -283,8 +285,8 @@ void TinhToanBiendangTocDo()
     else if (dang_giam_toc) {
         unsigned long t_giam = millis() - thoi_gian_bat_dau_giam;
         if (t_giam < thoi_gian_giam_toc) {
-            currentSpeedVal = 1.0f / ( 1.0f / toc_do_khi_bat_dau_giam
-                            + (1.0f / slowSpeed - 1.0f / toc_do_khi_bat_dau_giam) * ((float)t_giam / thoi_gian_giam_toc) );
+            // Giống Shizai: nội suy tuyến tính theo chu kỳ -> phanh mạnh ngay khi gặp vạch 14 lần 1
+            currentSpeedVal = toc_do_khi_bat_dau_giam + ((slowSpeed - toc_do_khi_bat_dau_giam) * ((float)t_giam / thoi_gian_giam_toc));
         } else {
             currentSpeedVal = (float)slowSpeed; 
             dang_giam_toc = false;
@@ -297,7 +299,7 @@ void TinhToanBiendangTocDo()
 
 void TinhToanVaXuatPID() {
     int baseSpeed = (int)smoothBaseSpeed;
-    smoothedError = ((float)steering_error * 0.25) + (smoothedError * 0.75); 
+    smoothedError = ((float)steering_error * 0.35) + (smoothedError * 0.65); 
     int absError = abs(steering_error);
     int idx = (absError > 9) ? 9 : absError;
     float target_Kp = KP_TBL[idx];
@@ -306,9 +308,6 @@ void TinhToanVaXuatPID() {
     float speed_ratio = (float)(startSpeed - baseSpeed) / (startSpeed - speed);
     speed_ratio = constrain(speed_ratio, 0.0, 1.0);
     int target_offset = (int)(target_offset_raw * speed_ratio);
-    static float current_Kp = KP_TBL[0];
-    static float current_Kd = KD_TBL[0];
-    static float current_offset = 0.0;
     int UPDATE_RATE = 5;
     if (millis() - last_ramp_time >= UPDATE_RATE) {
         last_ramp_time = millis();
