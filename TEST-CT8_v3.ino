@@ -1,4 +1,4 @@
-//AGV CT8 v6 26/10/2026
+//AGV CT8 v6 27/10/2026
 #include "control_step.h"
 #include "sensor.h"
 const int pin_bao_mat_line = 45;
@@ -11,20 +11,22 @@ const unsigned long thoi_gian_bo_qua_mat_line = 500;
 const unsigned long thoi_gian_duy_tri_case_9 = 3000;   // Lỡ out line ở case 9 / -9: giữ lái + chạy tiếp thêm 3s rồi mới dừng
 const unsigned long thoi_gian_xac_nhan_co_line = 50;   // Thấy lại line liên tục 50ms mới coi là tìm lại được (lọc nhiễu)
 
-const int speed = 1170;
+const int speed = 1200;
 const int slowSpeed = 12000;
 const int startSpeed = 12000;
 const unsigned long thoi_gian_tang_toc = 9000;
 const unsigned long thoi_gian_giam_toc = 6000;
 
-// --- PID GIỐNG AGV SHIZAI ---
-const float KP_TBL[10] = {   0,  25,  45,  70,  95, 130, 180, 220, 310, 500 };
+// --- PID GIỐNG AGV SHIZAI --- 
+//const float KP_TBL[10] = {   0,  25,  45,  70,  95, 130, 180, 220, 310, 500 };
+const float KP_TBL[10] = {   0,  30,  54,  84, 114, 156, 216, 264, 372, 600 };
 const float KD_TBL[10] = { 500, 500, 500, 500, 500, 500, 500, 500, 500, 500 };   // Kd cố định 500 như Shizai
 const int   BU_TBL[10] = {   5,  10,  20,  50,  80, 100, 240, 320, 410, 500 };
 const float Ki = 0.01;
-const float TIME_VAO_CUA = 200.0;
-const float TIME_RA_CUA  = 300.0;
-
+const float TIME_VAO_CUA = 200.0;      // ms: Kp/Kd tăng khi vào cua (giữ nguyên)
+const float TIME_RA_CUA  = 300.0;      // ms: Kp/Kd giảm khi ra cua (giữ nguyên)
+const float TIME_OFFSET_VAO = 400.0;   // ms: giảm tốc từ từ khi vào cua
+const float TIME_OFFSET_RA  = 800.0;   // ms: tăng tốc từ từ khi ra cua
 int raw_sensor = 0;
 int steering_error = 0;
 int last_valid_sensor = 0;
@@ -313,8 +315,8 @@ void TinhToanVaXuatPID() {
         last_ramp_time = millis();
         float time_vao = max(TIME_VAO_CUA, 1.0f);
         float time_ra  = max(TIME_RA_CUA,  1.0f);
-        float step_offset_vao = ((float)BU_TBL[9] / time_vao) * UPDATE_RATE;
-        float step_offset_ra  = ((float)BU_TBL[9] / time_ra) * UPDATE_RATE;
+        float step_offset_vao = ((float)BU_TBL[9] / max(TIME_OFFSET_VAO, 1.0f)) * UPDATE_RATE;
+        float step_offset_ra  = ((float)BU_TBL[9] / max(TIME_OFFSET_RA,  1.0f)) * UPDATE_RATE;
         float step_Kp_vao = ((KP_TBL[9] - KP_TBL[0]) / time_vao) * UPDATE_RATE;
         float step_Kp_ra  = ((KP_TBL[9] - KP_TBL[0]) / time_ra) * UPDATE_RATE;
         float step_Kd_vao = ((KD_TBL[9] - KD_TBL[0]) / time_vao) * UPDATE_RATE;
@@ -333,7 +335,8 @@ void TinhToanVaXuatPID() {
     derivative = constrain(derivative, -2.0, 2.0); 
     float rawPid = (current_Kp * smoothedError) + (Ki * integral) + (current_Kd * derivative);
     lastError = smoothedError;
-    float filteredPid = (rawPid * 0.05) + (lastPidOutput * 0.95);
+    //float filteredPid = (rawPid * 0.05) + (lastPidOutput * 0.95);
+    float filteredPid = (rawPid * 0.07) + (lastPidOutput * 0.93);   // trước là 0.05 / 0.95
     if (filteredPid > lastPidOutput + 100) filteredPid = lastPidOutput + 100;
     else if (filteredPid < lastPidOutput - 100) filteredPid = lastPidOutput - 100;
     lastPidOutput = filteredPid;
